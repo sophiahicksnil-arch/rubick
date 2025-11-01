@@ -12,7 +12,7 @@
       <a-row>
         <a-col
           @click="() => openPlugin(item)"
-          @contextmenu.prevent="openMenu($event,item)"
+          @contextmenu.prevent="openMenu($event, item)"
           :class="
             currentSelect === index ? 'active history-item' : 'history-item'
           "
@@ -28,7 +28,65 @@
         </a-col>
       </a-row>
     </div>
-    <a-list v-else item-layout="horizontal" :dataSource="sort(options)">
+
+    <!-- 搜索结果区域 -->
+    <div
+      v-else-if="sortedOptions.bestMatches && sortedOptions.bestMatches.length"
+      class="search-results"
+    >
+      <!-- 最佳匹配区域 -->
+      <div
+        class="best-matches-section"
+        v-if="sortedOptions.bestMatches.length > 0"
+      >
+        <div class="section-title">最佳匹配</div>
+        <div class="grid-container">
+          <div
+            v-for="(item, index) in sortedOptions.bestMatches"
+            :key="index"
+            @click="() => item.click()"
+            :class="currentSelect === index ? 'grid-item active' : 'grid-item'"
+          >
+            <div class="icon-container">
+              <img :src="item.icon" class="app-icon" />
+              <div class="best-match-badge">最佳</div>
+            </div>
+            <div class="app-name">{{ item.name }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 推荐区域 -->
+      <div
+        class="recommendations-section"
+        v-if="
+          sortedOptions.recommendations &&
+          sortedOptions.recommendations.length > 0
+        "
+      >
+        <div class="section-title">推荐</div>
+        <div class="grid-container">
+          <div
+            v-for="(item, index) in sortedOptions.recommendations"
+            :key="index"
+            @click="() => item.click()"
+            :class="
+              currentSelect === index + sortedOptions.bestMatches.length
+                ? 'grid-item active'
+                : 'grid-item'
+            "
+          >
+            <div class="icon-container">
+              <img :src="item.icon" class="app-icon" />
+            </div>
+            <div class="app-name">{{ item.name }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 原始结果列表（作为后备） -->
+    <a-list v-else item-layout="horizontal" :dataSource="sort(options).all">
       <template #renderItem="{ item, index }">
         <a-list-item
           @click="() => item.click()"
@@ -49,7 +107,15 @@
 </template>
 
 <script lang="ts" setup>
-import { defineEmits, defineProps, reactive, ref, toRaw, watch } from 'vue';
+import {
+  defineEmits,
+  defineProps,
+  reactive,
+  ref,
+  toRaw,
+  watch,
+  computed,
+} from 'vue';
 import localConfig from '../confOp';
 
 const path = window.require('path');
@@ -79,6 +145,11 @@ const props: any = defineProps({
 
 const emit = defineEmits(['choosePlugin', 'setPluginHistory']);
 
+// 添加计算属性
+const sortedOptions = computed(() => {
+  return sort(props.options);
+});
+
 const renderTitle = (title, match) => {
   if (typeof title !== 'string') return;
   if (!props.searchValue || !match) return title;
@@ -103,6 +174,7 @@ const renderDesc = (desc = '') => {
 };
 
 const sort = (options) => {
+  // 首先按照原有的 zIndex 排序
   for (let i = 0; i < options.length; i++) {
     for (let j = i + 1; j < options.length; j++) {
       if (options[j].zIndex > options[i].zIndex) {
@@ -112,7 +184,33 @@ const sort = (options) => {
       }
     }
   }
-  return options.slice(0, 20);
+
+  // 将结果分为最佳匹配和推荐
+  // 最佳匹配：应用程序和插件
+  const bestMatches = options.filter(
+    (item) =>
+      item.isBestMatch && (item.pluginType === 'app' || item.value === 'plugin')
+  );
+
+  // 推荐结果：应用程序、插件和文件
+  const recommendations = options.filter(
+    (item) =>
+      !item.isBestMatch &&
+      (item.pluginType === 'app' ||
+        item.value === 'plugin' ||
+        item.type === 'file')
+  );
+
+  // 限制最佳匹配数量为3-5个
+  const limitedBestMatches = bestMatches.slice(0, 5);
+  // 限制推荐数量
+  const limitedRecommendations = recommendations.slice(0, 15);
+
+  return {
+    bestMatches: limitedBestMatches,
+    recommendations: limitedRecommendations,
+    all: [...limitedBestMatches, ...limitedRecommendations],
+  };
 };
 
 const openPlugin = (item) => {
@@ -143,7 +241,9 @@ const initMainCmdMenus = () => {
       label: '从"使用记录"中删除',
       icon: path.join(__static, 'icons', 'delete@2x.png'),
       click: () => {
-        const history = props.pluginHistory.filter((item) => item.name !== menuState.plugin.name);
+        const history = props.pluginHistory.filter(
+          (item) => item.name !== menuState.plugin.name
+        );
         emit('setPluginHistory', toRaw(history));
       },
     },
@@ -203,6 +303,76 @@ initMainCmdMenus();
   font-weight: 400;
   color: #333;
   box-shadow: 2px 2px 3px 0 rgba(0, 0, 0, 0.3);
+}
+
+.search-results {
+  .section-title {
+    padding: 8px 16px;
+    font-size: 14px;
+    font-weight: bold;
+    color: var(--color-text-desc);
+    background: var(--color-body-bg);
+    border-bottom: 1px solid var(--color-border-light);
+  }
+
+  .grid-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+    gap: 16px;
+    padding: 16px;
+  }
+
+  .grid-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 8px;
+
+    &:hover,
+    &.active {
+      background: var(--color-list-hover);
+    }
+
+    .icon-container {
+      position: relative;
+      width: 48px;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 8px;
+
+      .app-icon {
+        width: 48px;
+        height: 48px;
+        object-fit: contain;
+      }
+
+      .best-match-badge {
+        position: absolute;
+        top: -4px;
+        right: -4px;
+        background: var(--ant-primary-color);
+        color: white;
+        font-size: 8px;
+        padding: 2px 4px;
+        border-radius: 8px;
+        line-height: 1;
+      }
+    }
+
+    .app-name {
+      font-size: 12px;
+      text-align: center;
+      color: var(--color-text-content);
+      width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
 }
 
 .options {
