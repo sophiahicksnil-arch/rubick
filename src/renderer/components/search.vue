@@ -14,7 +14,7 @@
       <img
         @click="() => emit('openMenu')"
         class="rubick-logo"
-        :src="currentPlugin.logo || config.perf.custom.logo"
+        :src="currentPlugin.logo || logoSrc"
       />
       <div class="select-tag" v-show="currentPlugin.cmd">
         {{ currentPlugin.cmd }}
@@ -51,7 +51,7 @@
 </template>
 
 <script setup lang="ts">
-import { defineProps, defineEmits, ref } from 'vue';
+import { defineProps, defineEmits, ref, computed } from 'vue';
 import { ipcRenderer } from 'electron';
 import { MoreOutlined } from '@ant-design/icons-vue';
 
@@ -60,6 +60,14 @@ import localConfig from '../confOp';
 const { Menu } = remote;
 
 const config: any = ref(localConfig.getConfig());
+
+const logoSrc = computed(() => {
+  if (process.env.NODE_ENV === 'development') {
+    return '/logo.png';
+  } else {
+    return config.value.perf.custom.logo;
+  }
+});
 
 const props: any = defineProps({
   searchValue: {

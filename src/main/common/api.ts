@@ -99,7 +99,7 @@ class API extends DBInstance {
         : `file://${__static}/tpl/index.html`;
     }
     if (plugin.name === 'rubick-system-feature') {
-      plugin.logo = plugin.logo || `file://${__static}/logo.png`;
+      plugin.logo = plugin.logo || (process.env.NODE_ENV === 'development' ? '/logo.png' : `file://${__static}/logo.png`);
       plugin.indexPath = commonConst.dev()
         ? 'http://localhost:8081/#/'
         : `file://${__static}/feature/index.html`;
@@ -386,3 +386,4 @@ class API extends DBInstance {
 }
 
 export default new API();
+

@@ -216,7 +216,7 @@ initMainCmdMenus();
   background: var(--color-body-bg);
   .history-plugins {
     width: 100%;
-    border-top: 1px dashed var(--color-border-light);
+    //border-top: 1px dashed var(--color-border-light);
     box-sizing: border-box;
     .history-item {
       cursor: pointer;
@@ -227,7 +227,7 @@ initMainCmdMenus();
       justify-content: center;
       flex-direction: column;
       color: var(--color-text-content);
-      border-right: 1px dashed var(--color-border-light);
+      //border-right: 1px dashed var(--color-border-light);
       position: relative;
       .badge {
         position: absolute;
