@@ -1,10 +1,49 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { ref, watch } from 'vue';
+import type { Ref } from 'vue';
 import debounce from 'lodash.debounce';
 import { ipcRenderer } from 'electron';
 import { getGlobal } from '@electron/remote';
 import PinyinMatch from 'pinyin-match';
 import pluginClickEvent from './pluginClickEvent';
 import useFocus from './clipboardWatch';
+
+// Types
+export type OptionItem = {
+  name?: string;
+  value?: string;
+  icon?: string;
+  desc?: string;
+  type?: string;
+  pluginType?: string;
+  match?: unknown;
+  zIndex?: number;
+  isBestMatch?: boolean;
+  pluginName?: string;
+  featureCode?: string;
+  cmdType?: string;
+  click?: () => void;
+  [key: string]: unknown;
+};
+
+export type AppEntry = {
+  pluginType: 'app';
+  name: string;
+  _name?: string;
+  desc?: string;
+  action?: string;
+  icon?: string;
+  keyWords: string[];
+  match?: unknown;
+  isBestMatch?: boolean;
+};
+
+export type OptionsManagerArgs = {
+  searchValue: Ref<string>;
+  appList: Ref<AppEntry[]>;
+  openPlugin: (plugin: Record<string, unknown>, option: OptionItem) => void;
+  currentPlugin: Ref<Record<string, unknown>>;
+};
 
 function formatReg(regStr) {
   const flags = regStr.replace(/.*\/([gimy]*)$/, '$1');
@@ -46,7 +85,6 @@ function searchKeyValues(lists, value, strict = false) {
   return lists.filter((item) => {
     if (typeof item === 'string') {
       // 转换为小写进行比较
-      const lowerItem = item.toLowerCase();
       const lowerValue = value.toLowerCase();
 
       // 检查原始匹配
@@ -69,18 +107,46 @@ function searchKeyValues(lists, value, strict = false) {
   });
 }
 
+/**
+ * 结果去重：避免同一 App 或同一命令重复出现
+ * - App：按真实路径/动作唯一（优先 desc=path，其次 action），不受 name 影响
+ * - 插件命令：按 icon + 规范化 name + type 唯一（忽略 desc，以消除同命令不同描述的重复）
+ */
+function normalizeName(s: string) {
+  return (s || '').toString().toLowerCase().trim();
+}
+function dedupeOptions(list: OptionItem[]): OptionItem[] {
+  const seen = new Map<string, boolean>();
+  return list.filter((opt) => {
+    const key =
+      opt.pluginType === 'app'
+        ? `app:${opt.desc || opt.action || opt.name}`
+        : `plugin:${opt.pluginName || ''}:${
+            opt.featureCode || ''
+          }:${normalizeName((opt.name || '') as string)}:${
+            opt.cmdType || opt.type || ''
+          }`;
+    if (seen.has(key)) return false;
+    seen.set(key, true);
+    return true;
+  });
+}
+
+/* eslint-disable @typescript-eslint/explicit-module-boundary-types */
 const optionsManager = ({
   searchValue,
   appList,
   openPlugin,
   currentPlugin,
-}) => {
-  const optionsRef = ref([]);
+}: OptionsManagerArgs) => {
+  const optionsRef = ref<OptionItem[]>([]);
 
   // 全局快捷键
   ipcRenderer.on('global-short-key', (e, msg) => {
     const options = getOptionsFromSearchValue(msg, true);
-    options[0].click();
+    if (options && options.length) {
+      options[0]?.click?.();
+    }
   });
 
   const getIndex = (cmd, value) => {
@@ -94,9 +160,12 @@ const optionsManager = ({
     return index;
   };
 
-  const getOptionsFromSearchValue = (value, strict = false) => {
+  const getOptionsFromSearchValue = (
+    value: string,
+    strict = false
+  ): OptionItem[] => {
     const localPlugins = getGlobal('LOCAL_PLUGINS').getLocalPlugins();
-    let options: any = [];
+    let options: OptionItem[] = [];
 
     // 插件搜索逻辑
     localPlugins.forEach((plugin) => {
@@ -125,6 +194,10 @@ const optionsManager = ({
               isBestMatch:
                 isExactMatch ||
                 (isStartsWithMatch && (cmd.label || cmd).length <= 5), // 完全匹配或短词开头匹配
+              // 用于去重的来源信息
+              pluginName: plugin.name,
+              featureCode: fe.code,
+              cmdType: cmd.type || 'text',
               click: () => {
                 pluginClickEvent({
                   plugin,
@@ -150,49 +223,49 @@ const optionsManager = ({
 
     // 应用搜索逻辑
     const appPlugins = appList.value || [];
-    const descMap = new Map();
+    const descMap: Map<string, boolean> = new Map();
     options = [
       ...options,
       ...appPlugins
         .filter((plugin) => {
-          if (!descMap.get(plugin)) {
-            descMap.set(plugin, true);
-            let has = false;
-            plugin.keyWords.some((keyWord) => {
-              // 转换为小写进行比较
-              const lowerKeyWord = keyWord.toLowerCase();
-              const lowerValue = value.toLowerCase();
+          const uniqueKey = plugin.desc || plugin.action || plugin._name || plugin.name;
+          let matched = false;
 
-              // 检查原始匹配
-              const match = PinyinMatch.match(keyWord, value);
-              // 检查首字母简称匹配
-              const firstLetterMatch = getFirstLetterAbbreviation(keyWord)
-                .toLowerCase()
-                .includes(lowerValue);
+          plugin.keyWords.some((keyWord) => {
+            // 转换为小写进行比较
+            const lowerValue = value.toLowerCase();
 
-              if (match || firstLetterMatch) {
-                has = keyWord;
-                plugin.name = keyWord;
-                plugin.match = match;
+            // 检查原始匹配
+            const match = PinyinMatch.match(keyWord, value);
+            // 检查首字母简称匹配
+            const firstLetterMatch = getFirstLetterAbbreviation(keyWord)
+              .toLowerCase()
+              .includes(lowerValue);
 
-                // 判断是否为最佳匹配
-                const isExactMatch =
-                  match && match[0] === 0 && match[1] === keyWord.length - 1;
-                const isStartsWithMatch = match && match[0] === 0;
-                const isFirstLetterMatch = firstLetterMatch;
-                plugin.isBestMatch =
-                  isExactMatch ||
-                  (isStartsWithMatch && keyWord.length <= 5) ||
-                  isFirstLetterMatch;
+            if (match || firstLetterMatch) {
+              matched = true;
+              plugin.name = keyWord;
+              plugin.match = match;
 
-                return true;
-              }
-              return false;
-            });
-            return has;
-          } else {
+              // 判断是否为最佳匹配
+              const isExactMatch =
+                match && match[0] === 0 && match[1] === keyWord.length - 1;
+              const isStartsWithMatch = match && match[0] === 0;
+              const isFirstLetterMatch = firstLetterMatch;
+              plugin.isBestMatch =
+                isExactMatch ||
+                (isStartsWithMatch && keyWord.length <= 5) ||
+                isFirstLetterMatch;
+
+              return true;
+            }
             return false;
-          }
+          });
+
+          if (!matched) return false;
+          if (descMap.has(uniqueKey)) return false;
+          descMap.set(uniqueKey, true);
+          return true;
         })
         .map((plugin) => {
           const option = {
@@ -206,54 +279,10 @@ const optionsManager = ({
         }),
     ];
 
-    // 文件搜索逻辑 - 搜索本地文件系统中的文件
-    // 这里我们添加一个简单的文件搜索功能
-    if (value && value.length > 2) {
-      // 只有当搜索词长度大于2时才搜索文件
-      try {
-        const fs = window.require('fs');
-        const path = window.require('path');
-        const os = window.require('os');
+    // 文件搜索逻辑（移除同步遍历以避免 UI 阻塞）
+    // 如需文件检索，请迁移到主进程（ipcMain.handle）或使用 Worker 异步实现
 
-        // 搜索用户主目录下的文件
-        const homeDir = os.homedir();
-        const searchDirs = [homeDir];
-
-        searchDirs.forEach((dir) => {
-          if (fs.existsSync(dir)) {
-            const files = fs.readdirSync(dir, { withFileTypes: true });
-            files.forEach((file) => {
-              if (file.name.toLowerCase().includes(value.toLowerCase())) {
-                const filePath = path.join(dir, file.name);
-                const fileOption = {
-                  name: file.name,
-                  value: 'file',
-                  icon: file.isDirectory()
-                    ? require('../assets/folder.png')
-                    : require('../assets/file.png'),
-                  desc: filePath,
-                  type: 'file',
-                  match: PinyinMatch.match(file.name, value),
-                  zIndex: 0,
-                  isBestMatch: false, // 文件不作为最佳匹配
-                  click: () => {
-                    // 打开文件或文件夹
-                    const { shell } = window.require('electron');
-                    shell.openPath(filePath);
-                  },
-                };
-                options.push(fileOption);
-              }
-            });
-          }
-        });
-      } catch (e) {
-        // 如果文件搜索失败，忽略错误
-        console.log('文件搜索失败:', e);
-      }
-    }
-
-    return options;
+    return dedupeOptions(options);
   };
 
   watch(searchValue, () => search(searchValue.value));
@@ -268,7 +297,7 @@ const optionsManager = ({
     optionsRef.value = getOptionsFromSearchValue(value);
   }, 100);
 
-  const setOptionsRef = (options) => {
+  const setOptionsRef = (options: OptionItem[]) => {
     optionsRef.value = options;
   };
 

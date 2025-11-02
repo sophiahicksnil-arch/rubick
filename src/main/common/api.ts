@@ -13,6 +13,7 @@ import fs from 'fs';
 import { screenCapture } from '@/core';
 import plist from 'plist';
 import ks from 'node-key-sender';
+import { spawn } from 'child_process';
 
 import {
   DECODE_KEY,
@@ -99,7 +100,11 @@ class API extends DBInstance {
         : `file://${__static}/tpl/index.html`;
     }
     if (plugin.name === 'rubick-system-feature') {
-      plugin.logo = plugin.logo || (process.env.NODE_ENV === 'development' ? '/logo.png' : `file://${__static}/logo.png`);
+      plugin.logo =
+        plugin.logo ||
+        (process.env.NODE_ENV === 'development'
+          ? '/logo.png'
+          : `file://${__static}/logo.png`);
       plugin.indexPath = commonConst.dev()
         ? 'http://localhost:8081/#/'
         : `file://${__static}/feature/index.html`;
@@ -346,6 +351,18 @@ class API extends DBInstance {
     return true;
   }
 
+  public runOpen({ data }, _window) {
+    // macOS: 使用系统 open 命令启动 .app
+    try {
+      const target = data && data.path;
+      if (!target || typeof target !== 'string') return false;
+      spawn('open', [target], { stdio: 'ignore', detached: true }).unref();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   public screenCapture(arg, window) {
     screenCapture(window, (img) => {
       runnerInstance.executeHooks('ScreenCapture', {
@@ -386,4 +403,3 @@ class API extends DBInstance {
 }
 
 export default new API();
-

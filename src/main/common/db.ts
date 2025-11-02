@@ -1,17 +1,29 @@
 import { LocalDb } from '@/core';
 import { app } from 'electron';
 
-const dbInstance = new LocalDb(app.getPath('userData'));
-dbInstance.init();
+let dbInstance: LocalDb | null = null;
+
+/**
+ * 惰性初始化 DB，避免在 app 未 ready 或打包时 electron 未注入导致的异常
+ */
+function getDb(): LocalDb {
+  if (!dbInstance) {
+    const userDataPath = app.getPath('userData');
+    dbInstance = new LocalDb(userDataPath);
+    dbInstance.init();
+  }
+  return dbInstance;
+}
 
 export default class DBInstance {
   public currentPlugin: null | any = null;
   private DBKEY = 'RUBICK_DB_DEFAULT';
   private DB_INFO_KET = 'RUBICK_PLUGIN_INFO';
+
   public async dbPut({ data }) {
     // 记录插件有哪些 dbkey，用于后续的数据同步
     if (this.currentPlugin && this.currentPlugin.name) {
-      let dbInfo: any = await dbInstance.get(this.DBKEY, this.DB_INFO_KET);
+      let dbInfo: any = await getDb().get(this.DBKEY, this.DB_INFO_KET);
       if (!dbInfo) {
         dbInfo = { data: [], _id: this.DB_INFO_KET };
       }
@@ -26,48 +38,50 @@ export default class DBInstance {
           keys: [data.data._id],
         });
       }
-      dbInstance.put(this.DBKEY, dbInfo);
+      await getDb().put(this.DBKEY, dbInfo);
     }
-    return dbInstance.put(this.DBKEY, data.data);
+    return getDb().put(this.DBKEY, data.data);
   }
 
   public dbGet({ data }) {
-    return dbInstance.get(this.DBKEY, data.id);
+    return getDb().get(this.DBKEY, data.id);
   }
 
   public dbRemove({ data }) {
-    return dbInstance.remove(this.DBKEY, data.doc);
+    return getDb().remove(this.DBKEY, data.doc);
   }
 
   public dbBulkDocs({ data }) {
-    return dbInstance.bulkDocs(this.DBKEY, data.docs);
+    return getDb().bulkDocs(this.DBKEY, data.docs);
   }
 
   public dbAllDocs({ data }) {
-    return dbInstance.allDocs(this.DBKEY, data.key);
+    return getDb().allDocs(this.DBKEY, data.key);
   }
 
   public dbDump({ data }) {
-    return dbInstance.dumpDb(data.target);
+    return getDb().dumpDb(data.target);
   }
 
   public dbImport({ data }) {
-    return dbInstance.importDb(data.target);
+    return getDb().importDb(data.target);
   }
 
   public dbPostAttachment({ data }) {
     const { docId, attachment, type } = data;
-    return dbInstance.postAttachment(this.DBKEY, docId, attachment, type);
+    return getDb().postAttachment(this.DBKEY, docId, attachment, type);
   }
 
   public dbGetAttachment({ data }) {
-    return dbInstance.getAttachment(this.DBKEY, data.docId);
+    return getDb().getAttachment(this.DBKEY, data.docId);
   }
 
   public async dbGetAttachmentType({ data }) {
-    const res: any = await this.dbGet(data.docId);
+    const res: any = await getDb().get(this.DBKEY, data.docId);
     if (!res || !res._attachments) return null;
-    const result = res._attachments[0];
-    return result ? result.content_type : null;
+    const keys = Object.keys(res._attachments || {});
+    if (!keys.length) return null;
+    const first = (res._attachments as any)[keys[0]];
+    return first ? first.content_type : null;
   }
 }

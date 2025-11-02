@@ -25,20 +25,13 @@
       ref="mainInput"
       class="main-input"
       @input="(e) => changeValue(e)"
-      @keydown.left="(e) => keydownEvent(e, 'left')"
-      @keydown.right="(e) => keydownEvent(e, 'right')"
-      @keydown.down="(e) => keydownEvent(e, 'down')"
-      @keydown.tab="(e) => keydownEvent(e, 'down')"
-      @keydown.up="(e) => keydownEvent(e, 'up')"
-      @keydown="(e) => checkNeedInit(e)"
+      @keydown="onKeydown"
       :value="searchValue"
       :placeholder="
         pluginLoading
           ? '更新检测中...'
-          : placeholder || config.perf.custom.placeholder
+          : placeholder || (config?.perf?.custom?.placeholder || '')
       "
-      @keypress.enter="(e) => keydownEvent(e, 'enter')"
-      @keypress.space="(e) => keydownEvent(e, 'space')"
       @focus="emit('focus')"
     >
       <template #suffix>
@@ -55,9 +48,9 @@ import { defineProps, defineEmits, ref, computed } from 'vue';
 import { ipcRenderer } from 'electron';
 import { MoreOutlined } from '@ant-design/icons-vue';
 
-const remote = window.require('@electron/remote');
 import localConfig from '../confOp';
-const { Menu } = remote;
+import { Menu } from '@electron/remote';
+declare const __static: string;
 
 const config: any = ref(localConfig.getConfig());
 
@@ -65,7 +58,10 @@ const logoSrc = computed(() => {
   if (process.env.NODE_ENV === 'development') {
     return '/logo.png';
   } else {
-    return config.value.perf.custom.logo;
+    const customLogo = config.value?.perf?.custom?.logo;
+    if (customLogo) return customLogo;
+    const staticBase = typeof __static !== 'undefined' ? __static : undefined;
+    return staticBase ? `file://${staticBase}/logo.png` : '/logo.png';
   }
 });
 
@@ -78,10 +74,22 @@ const props: any = defineProps({
     type: String,
     default: '',
   },
-  pluginHistory: (() => [])(),
-  currentPlugin: {},
-  pluginLoading: Boolean,
-  clipboardFile: (() => [])(),
+  pluginHistory: {
+    type: Array,
+    default: () => [],
+  },
+  currentPlugin: {
+    type: Object,
+    default: () => ({}),
+  },
+  pluginLoading: {
+    type: Boolean,
+    default: false,
+  },
+  clipboardFile: {
+    type: Array,
+    default: () => [],
+  },
 });
 
 const changeValue = (e) => {
@@ -138,13 +146,32 @@ const keydownEvent = (e, key: string) => {
       emit('choosePlugin');
       break;
     case 'space':
-      if (runPluginDisable || !config.value.perf.common.space) return;
+      if (runPluginDisable || !config.value?.perf?.common?.space) return;
       e.preventDefault();
       emit('choosePlugin');
       break;
     default:
       break;
   }
+};
+
+const onKeydown = (e: KeyboardEvent) => {
+  const map: Record<string, string> = {
+    ArrowUp: 'up',
+    ArrowDown: 'down',
+    ArrowLeft: 'left',
+    ArrowRight: 'right',
+    Enter: 'enter',
+    Tab: 'down',
+  };
+  let mapped = map[e.key];
+  if (!mapped && e.code === 'Space') {
+    mapped = 'space';
+  }
+  if (mapped) {
+    keydownEvent(e, mapped);
+  }
+  checkNeedInit(e);
 };
 
 const checkNeedInit = (e) => {
@@ -161,7 +188,7 @@ const checkNeedInit = (e) => {
 
 const targetSearch = ({ value }) => {
   if (props.currentPlugin.name) {
-    return ipcRenderer.sendSync('msg-trigger', {
+    ipcRenderer.send('msg-trigger', {
       type: 'sendSubInputChangeEvent',
       data: { text: value },
     });
@@ -179,14 +206,14 @@ const closeTag = () => {
 const showSeparate = () => {
   let pluginMenu: any = [
     {
-      label: config.value.perf.common.hideOnBlur ? '钉住' : '自动隐藏',
+      label: (config.value?.perf?.common?.hideOnBlur ? '钉住' : '自动隐藏'),
       click: changeHideOnBlur,
     },
     {
       label:
-        config.value.perf.common.lang === 'zh-CN'
+        (config.value?.perf?.common?.lang === 'zh-CN'
           ? '切换语言'
-          : 'Change Language',
+          : 'Change Language'),
       submenu: [
         {
           label: '简体中文',
@@ -234,29 +261,33 @@ const showSeparate = () => {
 };
 
 const changeLang = (lang) => {
-  let cfg = { ...config.value };
-  cfg.perf.common.lang = lang;
+  let cfg = { ...(config.value || {}) };
+  const perf = { ...(cfg.perf || {}) };
+  const common = { ...(perf.common || {}), lang };
+  cfg = { ...cfg, perf: { ...perf, common } };
   localConfig.setConfig(JSON.parse(JSON.stringify(cfg)));
   config.value = cfg;
 };
 
 const changeHideOnBlur = () => {
-  let cfg = { ...config.value };
-  cfg.perf.common.hideOnBlur = !cfg.perf.common.hideOnBlur;
+  const current = !!(config.value?.perf?.common?.hideOnBlur);
+  let cfg = { ...(config.value || {}) };
+  const perf = { ...(cfg.perf || {}) };
+  const common = { ...(perf.common || {}), hideOnBlur: !current };
+  cfg = { ...cfg, perf: { ...perf, common } };
   localConfig.setConfig(JSON.parse(JSON.stringify(cfg)));
   config.value = cfg;
 };
 
 const getIcon = () => {
   if (props.clipboardFile[0].dataUrl) return props.clipboardFile[0].dataUrl;
-  try {
-    return ipcRenderer.sendSync('msg-trigger', {
-      type: 'getFileIcon',
-      data: { path: props.clipboardFile[0].path },
-    });
-  } catch (e) {
-    return require('../assets/file.png');
+  const item = props.clipboardFile[0];
+  if (item && typeof item.isDirectory === 'boolean') {
+    return item.isDirectory
+      ? require('../assets/folder.png')
+      : require('../assets/file.png');
   }
+  return require('../assets/file.png');
 };
 
 const newWindow = () => {

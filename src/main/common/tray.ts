@@ -29,28 +29,28 @@ function createTray(window: BrowserWindow): Promise<Tray> {
 
     const createContextMenu = () =>
       Menu.buildFromTemplate([
-        {
-          label: '帮助文档',
-          click: () => {
-            process.nextTick(() => {
-              shell.openExternal('https://github.com/clouDr-f2e/rubick');
-            });
-          },
-        },
-        {
-          label: '引导教学',
-          click: () => {
-            guide().init();
-          },
-        },
-        {
-          label: '意见反馈',
-          click: () => {
-            process.nextTick(() => {
-              shell.openExternal('https://github.com/clouDr-f2e/rubick/issues');
-            });
-          },
-        },
+        // {
+        //   label: '帮助文档',
+        //   click: () => {
+        //     process.nextTick(() => {
+        //       shell.openExternal('https://github.com/clouDr-f2e/rubick');
+        //     });
+        //   },
+        // },
+        // {
+        //   label: '引导教学',
+        //   click: () => {
+        //     guide().init();
+        //   },
+        // },
+        // {
+        //   label: '意见反馈',
+        //   click: () => {
+        //     process.nextTick(() => {
+        //       shell.openExternal('https://github.com/clouDr-f2e/rubick/issues');
+        //     });
+        //   },
+        // },
         { type: 'separator' },
         {
           label: '显示',
@@ -77,17 +77,17 @@ function createTray(window: BrowserWindow): Promise<Tray> {
           },
         },
 
-        { type: 'separator' },
-        {
-          label: '关于',
-          click() {
-            dialog.showMessageBox({
-              title: '拉比克',
-              message: '极简、插件化的现代桌面软件',
-              detail: `Version: ${pkg.version}\nAuthor: muwoo`,
-            });
-          },
-        },
+        // { type: 'separator' },
+        // {
+        //   label: '关于',
+        //   click() {
+        //     dialog.showMessageBox({
+        //       title: '拉比克',
+        //       message: '极简、插件化的现代桌面软件',
+        //       detail: `Version: ${pkg.version}\nAuthor: muwoo`,
+        //     });
+        //   },
+        // },
       ]);
     appIcon.on('click', () => {
       appIcon.setContextMenu(createContextMenu());

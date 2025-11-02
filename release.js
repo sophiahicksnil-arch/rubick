@@ -1,3 +1,4 @@
+/* eslint-disable */
 exports.default = async function () {
   const fs = require('fs');
   const compressing = require('compressing');

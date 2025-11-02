@@ -32,7 +32,6 @@
 
 <script setup lang="ts">
 import { watch, ref, toRaw } from 'vue';
-import { exec } from 'child_process';
 import Result from './components/result.vue';
 import Search from './components/search.vue';
 import getWindowHeight from '../common/utils/getWindowHeight';
@@ -42,9 +41,9 @@ import { getGlobal } from '@electron/remote';
 import { PLUGIN_HISTORY } from '@/common/constans/renderer';
 import { message } from 'ant-design-vue';
 import localConfig from './confOp';
+declare const __static: string;
 
 const { onMouseDown } = useDrag();
-const remote = window.require('@electron/remote');
 
 const {
   initPlugins,
@@ -74,28 +73,35 @@ const menuPluginInfo: any = ref({});
 
 const config: any = ref(localConfig.getConfig());
 
-getPluginInfo({
-  pluginName: 'feature',
-  // eslint-disable-next-line no-undef
-  pluginPath: `${__static}/feature/package.json`,
-}).then((res) => {
-  menuPluginInfo.value = res;
-  remote.getGlobal('LOCAL_PLUGINS').addPlugin(res);
-});
+const staticBase = typeof __static !== 'undefined' ? __static : undefined;
+if (staticBase) {
+  getPluginInfo({
+    pluginName: 'feature',
+    pluginPath: `${staticBase}/feature/package.json`,
+  })
+    .then((res) => {
+      menuPluginInfo.value = res;
+      getGlobal('LOCAL_PLUGINS').addPlugin(res);
+    })
+    .catch((err) => {
+      console.error('[FeaturePluginInitError]', err);
+    });
+} else {
+  console.warn('[FeaturePluginInitSkip] __static not available in renderer, skip registering feature plugin.');
+}
 
 watch(
   [options, pluginHistory, currentPlugin],
   () => {
     currentSelect.value = 0;
     if (currentPlugin.value.name) return;
-    window.rubick.setExpendHeight(
-      getWindowHeight(
-        options.value,
-        pluginLoading.value || !config.value.perf.common.history
-          ? []
-          : pluginHistory.value
-      )
-    );
+    const historyEnabled =
+      !!(config.value && config.value.perf && config.value.perf.common && config.value.perf.common.history);
+    const list = pluginLoading.value || !historyEnabled ? [] : pluginHistory.value;
+    const height = getWindowHeight(options.value, list);
+    if (window && (window as any).rubick && typeof (window as any).rubick.setExpendHeight === 'function') {
+      (window as any).rubick.setExpendHeight(height);
+    }
   },
   {
     immediate: true,
@@ -126,7 +132,7 @@ const openMenu = (ext) => {
 
 window.rubick.openMenu = openMenu;
 
-const choosePlugin = (plugin) => {
+const choosePlugin = async (plugin) => {
   if (options.value.length) {
     const currentChoose = options.value[currentSelect.value];
     currentChoose.click();
@@ -137,7 +143,11 @@ const choosePlugin = (plugin) => {
     if (currentChoose.pluginType === 'app') {
       hasRemove = false;
       changePluginHistory(currentChoose);
-      exec(currentChoose.action);
+      try {
+        window.rubick.openApp(currentChoose.desc);
+      } catch (e) {
+        return message.error('启动应用出错，请确保启动应用存在或路径合法！');
+      }
       return;
     }
     localPlugins.find((plugin) => {

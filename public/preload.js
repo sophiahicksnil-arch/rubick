@@ -1,7 +1,23 @@
-const { ipcRenderer, shell } = require('electron');
+/* eslint-disable */
+const { ipcRenderer, shell, contextBridge } = require('electron');
 const { BrowserWindow, nativeTheme, screen, app } = require('@electron/remote');
 const os = require('os');
 const path = require('path');
+
+// 提供 Node 全局到渲染上下文，修复开发模式下 WDS 依赖 require('events') 导致的 require 未定义
+try {
+  if (typeof window.require !== 'function') {
+    window.require = require;
+  }
+  if (typeof window.process === 'undefined') {
+    window.process = process;
+  }
+  if (typeof global !== 'undefined' && !global.process) {
+    global.process = process;
+  }
+} catch (e) {
+  // ignore polyfill errors
+}
 
 const appPath = app.getPath('userData');
 
@@ -158,6 +174,9 @@ window.rubick = {
   shellOpenPath(path) {
     shell.openPath(path);
   },
+  openApp(path) {
+    ipcSend('runOpen', { path });
+  },
 
   getLocalId: () => ipcSendSync('getLocalId'),
 
@@ -217,9 +236,9 @@ window.rubick = {
       backgroundColor: nativeTheme.shouldUseDarkColors ? '#1c1c28' : '#fff',
       ...options,
       webPreferences: {
-        webSecurity: false,
+        webSecurity: process.env.NODE_ENV === 'development' ? false : true,
         backgroundThrottling: false,
-        contextIsolation: false,
+        contextIsolation: true,
         webviewTag: true,
         nodeIntegration: true,
         spellcheck: false,
@@ -242,3 +261,15 @@ window.rubick = {
     return win;
   },
 };
+try {
+  if (process.contextIsolated && contextBridge && typeof contextBridge.exposeInMainWorld === 'function') {
+    // 在开启 contextIsolation 的场景通过 contextBridge 暴露
+    contextBridge.exposeInMainWorld('rubick', window.rubick);
+  } else {
+    // 在关闭 contextIsolation 的场景直接挂载到 window，避免抛错导致 preload 加载失败
+    window.rubick = window.rubick;
+  }
+} catch (e) {
+  // 兜底：任何异常均回落到直接挂载，防止 “Unable to load preload script” 引发白屏
+  window.rubick = window.rubick;
+}

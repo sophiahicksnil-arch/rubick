@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { reactive, toRefs, ref } from 'vue';
 import { nativeImage, ipcRenderer } from 'electron';
 import { getGlobal } from '@electron/remote';
@@ -5,7 +6,6 @@ import appSearch from '@/core/app-search';
 import { PluginHandler } from '@/core';
 import path from 'path';
 import commonConst from '@/common/utils/commonConst';
-import { exec } from 'child_process';
 import searchManager from './search';
 import optionsManager from './options';
 import {
@@ -71,7 +71,10 @@ const createPluginManager = (): any => {
     state.pluginLoading = true;
     state.currentPlugin = plugin;
     // 自带的插件不需要检测更新
-    if (plugin.name === 'rubick-system-feature') return;
+    if (plugin.name === 'rubick-system-feature') {
+      state.pluginLoading = false;
+      return;
+    }
     await pluginInstance.upgrade(plugin.name);
     state.pluginLoading = false;
   };
@@ -102,9 +105,9 @@ const createPluginManager = (): any => {
     }
     if (plugin.pluginType === 'app') {
       try {
-        exec(plugin.action);
+        window.rubick.openApp(plugin.desc);
       } catch (e) {
-        message.error('启动应用出错，请确保启动应用存在！');
+        message.error('启动应用出错，请确保启动应用存在或路径合法！');
       }
     }
     changePluginHistory({
@@ -196,7 +199,7 @@ const createPluginManager = (): any => {
     state.plugins.unshift(plugin);
   };
 
-  const removePlugin = (plugin: any) => {
+  const removePlugin = () => {
     // todo
   };
 

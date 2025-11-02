@@ -6,7 +6,7 @@
         !options.length &&
         !searchValue &&
         !clipboardFile.length &&
-        config.perf.common.history
+        historyEnabled
       "
     >
       <a-row>
@@ -31,7 +31,9 @@
 
     <!-- 搜索结果区域 -->
     <div
-      v-else-if="sortedOptions.bestMatches && sortedOptions.bestMatches.length"
+      v-else-if="
+        sortedOptions.bestMatches.length || sortedOptions.recommendations.length
+      "
       class="search-results"
     >
       <!-- 最佳匹配区域 -->
@@ -44,7 +46,7 @@
           <div
             v-for="(item, index) in sortedOptions.bestMatches"
             :key="index"
-            @click="() => item.click()"
+            @click="() => item.click && item.click()"
             :class="currentSelect === index ? 'grid-item active' : 'grid-item'"
           >
             <div class="icon-container">
@@ -69,7 +71,7 @@
           <div
             v-for="(item, index) in sortedOptions.recommendations"
             :key="index"
-            @click="() => item.click()"
+            @click="() => item.click && item.click()"
             :class="
               currentSelect === index + sortedOptions.bestMatches.length
                 ? 'grid-item active'
@@ -89,7 +91,7 @@
     <a-list v-else item-layout="horizontal" :dataSource="sort(options).all">
       <template #renderItem="{ item, index }">
         <a-list-item
-          @click="() => item.click()"
+          @click="() => item.click && item.click()"
           :class="currentSelect === index ? 'active op-item' : 'op-item'"
         >
           <a-list-item-meta :description="renderDesc(item.desc)">
@@ -107,24 +109,43 @@
 </template>
 
 <script lang="ts" setup>
-import {
-  defineEmits,
-  defineProps,
-  reactive,
-  ref,
-  toRaw,
-  watch,
-  computed,
-} from 'vue';
+import { defineEmits, defineProps, reactive, ref, toRaw, computed } from 'vue';
 import localConfig from '../confOp';
-
-const path = window.require('path');
-const remote = window.require('@electron/remote');
+import { Menu } from '@electron/remote';
+import path from 'path';
 
 declare const __static: string;
 
-const config: any = ref(localConfig.getConfig());
+type PerfCommon = {
+  history?: boolean;
+  lang?: string;
+  hideOnBlur?: boolean;
+};
+type ConfigLike = {
+  perf?: {
+    common?: PerfCommon;
+    custom?: Record<string, unknown>;
+  };
+};
 
+const config = ref<ConfigLike>(
+  localConfig.getConfig() as unknown as ConfigLike
+);
+
+const historyEnabled = computed(
+  () =>
+    !!(
+      config.value &&
+      config.value.perf &&
+      config.value.perf.common &&
+      config.value.perf.common.history
+    )
+);
+
+/* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+/* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+/* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+/* eslint-disable-next-line @typescript-eslint/no-explicit-any */
 const props: any = defineProps({
   searchValue: {
     type: [String, Number],
@@ -132,15 +153,24 @@ const props: any = defineProps({
   },
   options: {
     type: Array,
-    default: (() => [])(),
+    default: () => [],
   },
   currentSelect: {
     type: Number,
     default: 0,
   },
-  currentPlugin: {},
-  pluginHistory: (() => [])(),
-  clipboardFile: (() => [])(),
+  currentPlugin: {
+    type: Object,
+    default: () => ({}),
+  },
+  pluginHistory: {
+    type: Array,
+    default: () => [],
+  },
+  clipboardFile: {
+    type: Array,
+    default: () => [],
+  },
 });
 
 const emit = defineEmits(['choosePlugin', 'setPluginHistory']);
@@ -174,37 +204,101 @@ const renderDesc = (desc = '') => {
 };
 
 const sort = (options) => {
-  // 首先按照原有的 zIndex 排序
-  for (let i = 0; i < options.length; i++) {
-    for (let j = i + 1; j < options.length; j++) {
-      if (options[j].zIndex > options[i].zIndex) {
-        let temp = options[i];
-        options[i] = options[j];
-        options[j] = temp;
-      }
-    }
-  }
+  // 非破坏性排序：复制后排序，避免原数组副作用
+  const cloned = options.slice();
 
-  // 将结果分为最佳匹配和推荐
-  // 最佳匹配：应用程序和插件
-  const bestMatches = options.filter(
-    (item) =>
-      item.isBestMatch && (item.pluginType === 'app' || item.value === 'plugin')
+  // 分类优先级：用户安装的应用/插件优先，文件次之，系统插件/应用最后
+  const categoryRank = (item) => {
+    // 明确识别系统插件/应用
+    if (item.pluginType === 'system' || item.name === 'rubick-system-feature')
+      return 2;
+    // 用户安装的应用或插件
+    if (item.pluginType === 'app' || item.value === 'plugin') return 0;
+    // 其他（如文件）
+    return 1;
+  };
+
+  const getZ = (x) => (typeof x.zIndex === 'number' ? x.zIndex : 0);
+
+  // 综合排序：先按类别，再按 zIndex（降序），再按是否最佳匹配，最后按名称
+  cloned.sort((a, b) => {
+    const ra = categoryRank(a);
+    const rb = categoryRank(b);
+    if (ra !== rb) return ra - rb;
+    const za = getZ(a);
+    const zb = getZ(b);
+    if (za !== zb) return zb - za;
+    if (a.isBestMatch !== b.isBestMatch) return a.isBestMatch ? -1 : 1;
+    const an = (a.name || '').toString();
+    const bn = (b.name || '').toString();
+    return an.localeCompare(bn);
+  });
+
+  // 将结果分为最佳匹配和推荐（保持“系统在后”的排序）
+  const bestMatches = cloned
+    .filter(
+      (item) =>
+        item.isBestMatch &&
+        (item.pluginType === 'app' || item.value === 'plugin')
+    )
+    .sort((a, b) => {
+      const ra = categoryRank(a);
+      const rb = categoryRank(b);
+      if (ra !== rb) return ra - rb;
+      const za = getZ(a);
+      const zb = getZ(b);
+      if (za !== zb) return zb - za;
+      const an = (a.name || '').toString();
+      const bn = (b.name || '').toString();
+      return an.localeCompare(bn);
+    });
+
+  const recommendations = cloned
+    .filter(
+      (item) =>
+        !item.isBestMatch &&
+        (item.pluginType === 'app' ||
+          item.value === 'plugin' ||
+          item.type === 'file')
+    )
+    .sort((a, b) => {
+      const ra = categoryRank(a);
+      const rb = categoryRank(b);
+      if (ra !== rb) return ra - rb;
+      const za = getZ(a);
+      const zb = getZ(b);
+      if (za !== zb) return zb - za;
+      const an = (a.name || '').toString();
+      const bn = (b.name || '').toString();
+      return an.localeCompare(bn);
+    });
+
+  // 二次去重：按标准化名称在“推荐”中去重，并移除与“最佳匹配”同名项
+  // 标准化规则：NFKC 归一化 + 小写 + 去零宽字符 + 去所有空白 + 去下划线/连字符
+  const normalizeNameLocal = (s: string) =>
+    (s || '')
+      .toString()
+      .normalize('NFKC')
+      .toLowerCase()
+      .replace(/[\u200b-\u200d\uFEFF]/g, '') // 零宽字符
+      .replace(/\s+/g, '') // 所有空白
+      .replace(/[_-]/g, ''); // 下划线/连字符
+
+  const bestMatchNameSet = new Set(
+    bestMatches.map((x) => normalizeNameLocal(x.name))
   );
+  const recNameSeen = new Set<string>();
+  const dedupedRecommendations = recommendations.filter((item) => {
+    const key = normalizeNameLocal(item.name);
+    if (bestMatchNameSet.has(key)) return false;
+    if (recNameSeen.has(key)) return false;
+    recNameSeen.add(key);
+    return true;
+  });
 
-  // 推荐结果：应用程序、插件和文件
-  const recommendations = options.filter(
-    (item) =>
-      !item.isBestMatch &&
-      (item.pluginType === 'app' ||
-        item.value === 'plugin' ||
-        item.type === 'file')
-  );
-
-  // 限制最佳匹配数量为3-5个
+  // 限制数量
   const limitedBestMatches = bestMatches.slice(0, 5);
-  // 限制推荐数量
-  const limitedRecommendations = recommendations.slice(0, 15);
+  const limitedRecommendations = dedupedRecommendations.slice(0, 15);
 
   return {
     bestMatches: limitedBestMatches,
@@ -217,17 +311,38 @@ const openPlugin = (item) => {
   emit('choosePlugin', item);
 };
 
-const menuState: any = reactive({
+type PluginLike = {
+  name?: string;
+  pin?: boolean;
+  icon?: string;
+};
+
+const menuState = reactive<{ plugin: PluginLike | null }>({
   plugin: null,
 });
-let mainMenus;
+let mainMenus: ReturnType<typeof Menu.buildFromTemplate>;
+
+const iconPath = (name: string) => {
+  try {
+    // eslint-disable-next-line no-undef
+    return typeof __static !== 'undefined'
+      ? path.join(__static, 'icons', name)
+      : undefined;
+  } catch (e) {
+    return undefined;
+  }
+};
 
 const openMenu = (e, item) => {
-  const pinToMain = mainMenus.getMenuItemById('pinToMain');
-  const unpinFromMain = mainMenus.getMenuItemById('unpinFromMain');
-  pinToMain.visible = !item.pin;
-  unpinFromMain.visible = item.pin;
-  mainMenus.popup({
+  const pinToMain = mainMenus?.getMenuItemById('pinToMain');
+  const unpinFromMain = mainMenus?.getMenuItemById('unpinFromMain');
+  if (pinToMain) {
+    pinToMain.visible = !item.pin;
+  }
+  if (unpinFromMain) {
+    unpinFromMain.visible = item.pin;
+  }
+  mainMenus?.popup({
     x: e.pageX,
     y: e.pageY,
   });
@@ -239,10 +354,12 @@ const initMainCmdMenus = () => {
     {
       id: 'removeRecentCmd',
       label: '从"使用记录"中删除',
-      icon: path.join(__static, 'icons', 'delete@2x.png'),
+      icon: iconPath('delete@2x.png'),
       click: () => {
+        const current = menuState.plugin;
+        if (!current) return;
         const history = props.pluginHistory.filter(
-          (item) => item.name !== menuState.plugin.name
+          (item) => item.name !== current.name
         );
         emit('setPluginHistory', toRaw(history));
       },
@@ -250,10 +367,12 @@ const initMainCmdMenus = () => {
     {
       id: 'pinToMain',
       label: '固定到"搜索面板"',
-      icon: path.join(__static, 'icons', 'pin@2x.png'),
+      icon: iconPath('pin@2x.png'),
       click: () => {
+        const current = menuState.plugin;
+        if (!current) return;
         const history = props.pluginHistory.map((item) => {
-          if (item.name === menuState.plugin.name) {
+          if (item.name === current.name) {
             item.pin = true;
           }
           return item;
@@ -264,10 +383,12 @@ const initMainCmdMenus = () => {
     {
       id: 'unpinFromMain',
       label: '从"搜索面板"取消固定',
-      icon: path.join(__static, 'icons', 'unpin@2x.png'),
+      icon: iconPath('unpin@2x.png'),
       click: () => {
+        const current = menuState.plugin;
+        if (!current) return;
         const history = props.pluginHistory.map((item) => {
-          if (item.name === menuState.plugin.name) {
+          if (item.name === current.name) {
             item.pin = false;
           }
           return item;
@@ -276,7 +397,7 @@ const initMainCmdMenus = () => {
       },
     },
   ];
-  mainMenus = remote.Menu.buildFromTemplate(menu);
+  mainMenus = Menu.buildFromTemplate(menu);
 };
 
 initMainCmdMenus();

@@ -10,6 +10,7 @@ import fixPath from 'fix-path';
 import spawn from 'cross-spawn';
 import { ipcRenderer } from 'electron';
 import axios from 'axios';
+import semver from 'semver';
 
 fixPath();
 
@@ -64,14 +65,18 @@ class AdapterHandler {
 
     // 从npm源中获取依赖包的最新版本
     try {
-      const installedVersion = packageJSON.dependencies[name].replace('^', '');
+      const installedVersionRaw =
+        packageJSON.dependencies && packageJSON.dependencies[name];
+      const installedVersion = installedVersionRaw
+        ? installedVersionRaw.replace('^', '')
+        : null;
       let latestVersion = this.pluginCaches[name];
       if (!latestVersion) {
         const { data } = await axios.get(registryUrl, { timeout: 2000 });
         latestVersion = data['dist-tags'].latest;
         this.pluginCaches[name] = latestVersion;
       }
-      if (latestVersion > installedVersion) {
+      if (!installedVersion || semver.gt(latestVersion, installedVersion)) {
         await this.install([name], { isDev: false });
       }
     } catch (e) {
